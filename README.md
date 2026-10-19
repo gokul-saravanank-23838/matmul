@@ -19,7 +19,8 @@ the selected lane. Future output values are labeled as previews.
 kernel listing. The app therefore documents a representative 128×128 block,
 8-deep K tile, 256-thread address mapping and safe barrier schedule, rather than
 claiming exact equivalence to unavailable source. It assumes row-major,
-unswizzled FP32 storage. The original kernel is needed to verify or replace
+unswizzled FP32 global storage; A is transposed when staged in shared memory
+so both operands support contiguous vector loads. The original kernel is needed to verify or replace
 these assumptions. The inline comments identify the modeled source phases.
 
 The default two-tile run computes a K=16 partial product in a 4096×4096 address
@@ -30,6 +31,7 @@ hardware scheduling, or measured performance.
 
 The built-in **Self-test / mapping audit** runs on opening the page and when
 changing K extent. It checks fragment coverage, accumulator ownership, shared
-address reconstruction, epilogue permutation and contiguous output writes,
+address reconstruction, vector-load contiguity/alignment and producer agreement,
+epilogue permutation and contiguous output writes,
 event counts, pipeline ordering, and numerical agreement with direct GEMM.
 Use **Run again** after changing block selection to audit that block.

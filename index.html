@@ -61,7 +61,7 @@
 </aside>
 </div>
 <div class="explain">
-<details class="panel" open><summary>Pipeline overview & mapping assumptions</summary><p>Representative block: 128×128 outputs, 256 threads, 8 warps arranged 4×2. A K tile is 8 elements deep. All addresses are row-major FP32 in a 4096×4096 space. Block x selects output columns; block y selects output rows. Choose 512 K tiles for the full K=4096 product; shorter runs compute <strong>D = α · A[:, 0:K] · B[0:K, :]</strong>, not the full product.</p><p>For thread t = 32w + lane, temporary index j: q = t + 256j. A loads (row = q≫3, k = q&amp;7), B loads (k = q≫7, col = q&amp;127). Warp w owns rows 32(w≫1)..+31 and columns 64(w&amp;1)..+63. Accumulator (r,c) maps to row = 32(w≫1) + 8(lane≫3) + r, col = 64(w&amp;1) + 8(lane&amp;7) + c, plus block origins.</p><p>No XOR swizzle is assumed: the chat’s XOR example is not evidence of this kernel’s actual layout. Numeric inputs are deterministic: A[y,k] = ((3y+k) mod 7)−3, B[k,x] = ((k+2x) mod 5)−2. Accumulator numbers are exact integer sums here; this is not an IEEE rounding study.</p></details>
+<details class="panel" open><summary>Pipeline overview & mapping assumptions</summary><p>Representative block: 128×128 outputs, 256 threads, 8 warps arranged 4×2. A K tile is 8 elements deep. Global addresses are row-major FP32 in a 4096×4096 space. Block x selects output columns; block y selects output rows. Choose 512 K tiles for the full K=4096 product; shorter runs compute <strong>D = α · A[:, 0:K] · B[0:K, :]</strong>, not the full product.</p><p>For thread t = 32w + lane, temporary index j: q = t + 256j. A loads (row = q≫3, k = q&amp;7), B loads (k = q≫7, col = q&amp;127). Within each shared stage, A is transposed into offset 128k + row; B uses offset 1024 + 128k + col. Both warp operands then have contiguous, 16-byte-aligned groups of four words. Warp w owns rows 32(w≫1)..+31 and columns 64(w&amp;1)..+63. Accumulator (r,c) maps to row = 32(w≫1) + 8(lane≫3) + r, col = 64(w&amp;1) + 8(lane&amp;7) + c, plus block origins.</p><p>No XOR swizzle is assumed: the chat’s XOR example is not evidence of this kernel’s actual layout. Numeric inputs are deterministic: A[y,k] = ((3y+k) mod 7)−3, B[k,x] = ((k+2x) mod 5)−2. Accumulator numbers are exact integer sums here; this is not an IEEE rounding study.</p></details>
 <details class="panel" open><summary>Double buffering & barriers</summary><p>Prologue loads global_a[4] and global_b[4], stores shared stage 0, then synchronizes the block. Two shared stages each hold A[128×8] + B[8×128] = 8 KiB. Tile t reads stage t mod 2. At step 0 it prefetches tile t+1 into the temporary registers, if one exists. At step 7 those registers commit to the alternate stage, then a barrier makes it available before switching.</p><p>warp_a[2][8] and warp_b[2][8] are a separate two-slot register ping-pong. This visualization loads step s+1 into the alternate slot before the FMA for step s, except at step 7. This is a source-order representation, not a latency-overlap claim. There is no out-of-range final prefetch. Barrier placement is a safe representative schedule pending the actual listing.</p></details>
 <details class="panel" open><summary>Epilogue staging & transpose-like reconstruction</summary><p>After all K tiles, the mainloop storage is dead and the <em>same union allocation</em> becomes epilogue scratch. Each of 8 iterations selects accumulator row r = iteration. Each warp writes 32×8 words at offset 256w + 8lane + c. A barrier publishes those stores. Consumer lane loads 256w + 32j + lane, for j = 0..7, scales by α, and writes D. A second barrier prevents scratch reuse before all consumers finish.</p><p>Decode q = 32j + lane: producer lane = q≫3, producer c = q&amp;7. This exchange changes which lane holds a value; it does not transpose the mathematical output. Neighboring consumers write neighboring columns. Scratch uses the first 8 KiB of the 16 KiB union; the other half is inactive, not an additional allocation.</p></details>
 <details class="panel" open><summary>PTX helpers / explicit memory operations</summary><p><code>@p ld.global.L2::128B.u32</code>: when the predicate is true, load one 32-bit word from a global address into a register. When false, no load occurs; the destination is not implicitly zeroed (a helper may initialize it separately). <code>L2::128B</code> is a cache/prefetch-size hint, <strong>not</strong> a 128-byte payload or proof of a cache hit. This app counts 4 bytes per active instruction.</p><p><code>ld.shared.v4.b32</code>: load four 32-bit words from shared memory into four registers, a 16-byte payload. Each modeled 8-element operand fragment uses two such loads.</p><p><code>@p st.global.u32</code>: when the predicate is true, store one 32-bit register word to global memory; otherwise perform no store. FP32 values travel as 32-bit bit patterns. The representative full tiles here are in bounds, so predicates are true. These helpers describe memory operations and predication—not instruction timing, cache behavior, or a cycle-accurate GPU simulation.</p></details>
@@ -91,7 +91,8 @@ function tempValues(tile,t=state.warp*32+state.lane) {
   const a=[],b=[];
   for(let j=0;j<4;j++) {
     const q=t+THREADS*j;
-    a.push({kind:'A',y:state.by*128+(q>>3),k:tile*8+(q&7),reg:`global_a[${j}]`,shared:tile%2*STAGE_WORDS+q});
+    // Global A is row-major; staging transposes the tile to make warp vectors contiguous.
+    a.push({kind:'A',y:state.by*128+(q>>3),k:tile*8+(q&7),reg:`global_a[${j}]`,shared:tile%2*STAGE_WORDS+(q&7)*128+(q>>3)});
     b.push({kind:'B',k:tile*8+(q>>7),x:state.bx*128+(q&127),reg:`global_b[${j}]`,shared:tile%2*STAGE_WORDS+1024+q});
   }
   return [...a,...b];
@@ -100,7 +101,7 @@ function operandValues(tile,s,w=state.warp,l=state.lane) {
   const a=[],b=[];
   for(let i=0;i<8;i++) {
     const p=outCoord(w,l,i,i);
-    a.push({kind:'A',y:p.y,k:tile*8+s,reg:`warp_a[${s%2}][${i}]`,shared:tile%2*STAGE_WORDS+(p.y-state.by*128)*8+s});
+    a.push({kind:'A',y:p.y,k:tile*8+s,reg:`warp_a[${s%2}][${i}]`,shared:tile%2*STAGE_WORDS+s*128+p.y-state.by*128});
     b.push({kind:'B',x:p.x,k:tile*8+s,reg:`warp_b[${s%2}][${i}]`,shared:tile%2*STAGE_WORDS+1024+s*128+p.x-state.bx*128});
   }
   return [...a,...b];
@@ -214,7 +215,8 @@ function renderTrace(e,t) {
     if(local<0||local>=128)lines.push('Pinned input is outside the current block. Select its block to view its local register/shared path.');
     else {
       lines.push(`Global → thread ${thread} (warp ${thread>>5}, lane ${thread&31}) → global_${v.kind.toLowerCase()}[${j}]`);
-      lines.push(`→ shared stage ${tile%2}, word ${tile%2*2048+(v.kind==='B'?1024:0)+q}, byte ${(tile%2*2048+(v.kind==='B'?1024:0)+q)*4}`);
+      const shared=tile%2*STAGE_WORDS+(v.kind==='B'?1024:0)+s*128+local;
+      lines.push(`→ shared stage ${tile%2}, word ${shared}, byte ${shared*4}${v.kind==='A'?' (transposed staging)':''}`);
       const target=v.kind==='A'?`warp row ${Math.floor(local/32)}, lane row-group ${Math.floor(local%32/8)}, A element ${local%8}`:`warp column ${Math.floor(local/64)}, lane column-group ${Math.floor(local%64/8)}, B element ${local%8}`;
       lines.push(`→ operand slot ${s%2} · ${target}`);
       lines.push('→ reused in outer-product FMAs; the input contributes to multiple output accumulators (it is not itself an output value).');
@@ -341,11 +343,26 @@ function runAudits() {
     for(let tile=0;tile<2;tile++)for(let w=0;w<8;w++)for(let l=0;l<32;l++)for(let s=0;s<8;s++)for(const v of operandValues(tile,s,w,l)){
       const local=v.shared-tile*STAGE_WORDS;
       const q=v.kind==='A'?local:local-1024;
-      if(v.kind==='A'&&(v.y!==state.by*128+(q>>3)||v.k!==tile*8+(q&7)))return false;
+      if(v.kind==='A'&&(v.y!==state.by*128+(q&127)||v.k!==tile*8+(q>>7)))return false;
       if(v.kind==='B'&&(v.k!==tile*8+(q>>7)||v.x!==state.bx*128+(q&127)))return false;
       if(local<0||local>=2048)return false;
     }
     return true;
+  });
+  check('Each operand v4 group is contiguous, aligned, and matches its staged producer',()=>{
+    const staged=new Map();
+    for(let tile=0;tile<2;tile++)for(let t=0;t<256;t++)for(const v of tempValues(tile,t)){
+      if(staged.has(v.shared))return false;
+      staged.set(v.shared,identity(v));
+    }
+    for(let tile=0;tile<2;tile++)for(let w=0;w<8;w++)for(let l=0;l<32;l++)for(let s=0;s<8;s++){
+      const ops=operandValues(tile,s,w,l);
+      for(let base=0;base<16;base+=4)for(let j=0;j<4;j++){
+        const v=ops[base+j];
+        if(ops[base].shared%4!==0||v.shared!==ops[base].shared+j||staged.get(v.shared)!==identity(v))return false;
+      }
+    }
+    return staged.size===4096;
   });
   check('8 epilogue exchanges preserve values, cover D once, and reorder lanes',()=>{
     const seen=new Set();
