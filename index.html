@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SIMT Atlas · GEMM dataflow</title>
+<style>
+:root{color-scheme:dark;--bg:#090f1b;--panel:#111b2b;--edge:#26364e;--text:#e3edfc;--muted:#9baec8;--global:#54bfff;--shared:#ba9aff;--reg:#55dfc0;--acc:#ffcb70;--out:#f78ead}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top left,#182b46,transparent 55%),var(--bg);color:var(--text);font:14px/1.5 system-ui,sans-serif}main{max-width:1560px;margin:auto;padding:28px}h1,h2,h3,p{margin:0 0 12px}h1{font-size:32px;letter-spacing:-1px}h2{font-size:17px}h3{font-size:14px}small,.muted{color:var(--muted)}a{color:var(--global)}header{display:flex;justify-content:space-between;gap:24px;align-items:center;margin-bottom:20px}.eyebrow{color:var(--reg);font-size:11px;letter-spacing:2px;font-weight:700}.badge{border:1px solid var(--edge);border-radius:25px;padding:6px 12px;white-space:nowrap}.notice{background:#26302055;border:1px solid #7b713c;border-radius:10px;padding:12px 16px;margin-bottom:16px;color:#e4d6ac}.panel{background:linear-gradient(145deg,#152136,#101927);border:1px solid var(--edge);border-radius:12px;padding:18px;min-width:0}.toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-bottom:16px}label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted)}button,select,input{font:inherit}button,select,input[type=number]{background:#1b2b42;border:1px solid #3a506f;border-radius:6px;color:var(--text);padding:7px 10px}button{cursor:pointer}button:hover{border-color:var(--global);background:#233b57}button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--global);outline-offset:3px}button:disabled{opacity:.4;cursor:default}.primary{background:#197862;border-color:#37b59b;min-width:90px}input[type=number]{width:74px}input[type=range]{width:100px;accent-color:var(--reg)}.check{flex-direction:row;align-items:center;align-self:center;padding-top:18px;gap:8px}.layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px}.stack{display:grid;gap:16px;align-content:start}.flow{display:flex;align-items:stretch;gap:6px;overflow:auto;margin:14px 0}.node{border:1px solid var(--edge);border-top:3px solid var(--color);padding:12px;min-width:125px;flex:1;border-radius:8px;background:#0c1524;color:var(--muted);font-size:12px}.node strong{display:block;color:var(--color);font-size:13px;margin-bottom:6px}.node.active{box-shadow:0 0 18px color-mix(in srgb,var(--color) 20%,transparent);background:#23344b;border-color:var(--color)}.arrow{align-self:center;color:var(--muted)}.legend{display:flex;gap:15px;flex-wrap:wrap;font-size:12px;color:var(--muted)}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;background:var(--color)}.event-title{display:flex;align-items:center;justify-content:space-between;gap:10px}.event-title h2{color:var(--reg);margin:0}#event-detail{min-height:48px;margin-top:12px}.progress{height:4px;background:#26364e;border-radius:5px;margin-top:14px}.progress div{height:100%;background:var(--reg);border-radius:5px}.views{display:grid;grid-template-columns:1fr 1fr;gap:16px}.subhead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px}.subhead h2{margin:0}.subhead small{text-align:right}.cells{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:4px}.cell{padding:6px 2px;min-height:36px;font:11px ui-monospace,monospace;border-color:#2e4059;overflow:hidden;color:var(--color,var(--text));background:#0c1727;white-space:nowrap}.cell.pinned{outline:2px solid #fff;outline-offset:-2px;background:#33405b}.cell.current{border-color:var(--color);background:#24354c}.cell.empty{opacity:.5}.slot{border:1px solid var(--edge);padding:10px;border-radius:8px;margin-top:10px}.slot.active{border-color:var(--reg)}.slot h3{display:flex;justify-content:space-between}.slot .cells{grid-template-columns:repeat(8,minmax(0,1fr))}.mini{font-size:11px}.union{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:12px 0}.region{padding:12px;border:1px solid var(--shared);border-radius:7px;background:#ba9aff0a}.region.active{background:#ba9aff2b}.region.inactive{opacity:.5}.region strong{display:block;color:var(--shared)}.metrics{display:grid;grid-template-columns:1fr 1fr;gap:8px}.metric{background:#0c1524;border-radius:7px;padding:10px}.metric strong{display:block;font:21px ui-monospace,monospace;color:var(--global)}table{width:100%;border-collapse:collapse;font-size:12px}th,td{text-align:left;border-bottom:1px solid var(--edge);padding:7px 4px}th{color:var(--muted);font-weight:500}.timeline{max-height:360px;overflow:auto;display:grid;gap:5px}.timeline button{text-align:left;font-size:12px;background:#0c1524}.timeline button.active{border-color:var(--reg);color:var(--reg)}code{font-family:ui-monospace,monospace;color:#c4d9fa;overflow-wrap:anywhere}.trace{font:12px/1.7 ui-monospace,monospace;overflow-wrap:anywhere;border-left:2px solid var(--reg);padding-left:12px}.trace p{margin:8px 0}.explain{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}details summary{cursor:pointer;font-weight:600}details p{margin-top:12px;color:var(--muted)}.audit-pass{color:var(--reg)}.audit-fail{color:var(--out)}#audits ul{padding-left:20px;margin-bottom:0}footer{color:var(--muted);font-size:12px;margin-top:20px}.scroll{overflow:auto}.caption{margin-top:10px;font-size:12px;color:var(--muted)}@media(max-width:1100px){.layout{grid-template-columns:1fr}.sidebar{display:grid;grid-template-columns:1fr 1fr;gap:16px}.sidebar>.panel{margin:0}.flow{flex-wrap:wrap}.node{min-width:140px}.arrow{display:none}}@media(max-width:680px){main{padding:14px}.views,.explain,.sidebar{grid-template-columns:1fr}header{display:block}header .badge{display:inline-block;margin-top:8px}h1{font-size:27px}.cell{font-size:10px}.toolbar{gap:8px}.panel{padding:12px}}
+</style>
+</head>
+<body>
+<main>
+<header><div><div class="eyebrow">SIMT ATLAS / SOURCE-LEVEL EXPLORER</div><h1>Follow the data. Not the clock.</h1><p class="muted">Flattened FP32 GEMM · global → registers → shared → 8×8 accumulators → D</p></div><span class="badge">D = α · A · B &nbsp; / &nbsp; no C input</span></header>
+<div class="notice"><strong>Reconstruction, not an emulator.</strong> The supplied conversation does not include the kernel listing or its exact address expressions. This app uses a documented, internally audited representative mapping matching the described fragment sizes and phases. Layouts, tile dimensions, and barrier placement below are assumptions—not a verified transcription. No cycles, cache hits, bank-conflict timing, or hardware scheduling are simulated.</div>
+<section class="panel toolbar" aria-label="Playback and selection">
+<button id="play" class="primary">▶ Play</button><button id="step">Step →</button><button id="reset">↺ Reset</button>
+<label>Speed <input id="speed" type="range" min="1" max="12" value="3" aria-label="Events per second"><span id="speed-label">3 events/s</span></label>
+<label>Block x <input id="block-x" type="number" min="0" max="31" value="0"></label>
+<label>Block y <input id="block-y" type="number" min="0" max="31" value="0"></label>
+<label>Warp <select id="warp"></select></label><label>Lane <select id="lane"></select></label>
+<label>K tiles <select id="tiles"><option value="1">1 · K=8</option><option value="2" selected>2 · K=16</option><option value="4">4 · K=32</option><option value="512">512 · K=4096</option></select></label>
+<label>K tile <select id="tile"></select></label><label>K-step <select id="kstep"></select></label>
+<label>Epilogue iteration <select id="epi"></select></label>
+<label>α <input id="alpha" type="number" min="-10" max="10" step="0.25" value="1"></label>
+<label class="check"><input id="coords" type="checkbox" checked> Coordinate labels</label>
+</section>
+<div class="layout">
+<div class="stack">
+<section class="panel">
+<div class="event-title"><h2 id="event-title"></h2><span id="event-number" class="muted mini"></span></div>
+<p id="event-detail"></p><div class="progress"><div id="progress"></div></div>
+<div class="flow" id="flow">
+<div class="node" data-node="global" style="--color:var(--global)"><strong>01 / Global A, B</strong>Row-major FP32<br>4096×4096 address space</div><span class="arrow">→</span>
+<div class="node" data-node="temp" style="--color:var(--reg)"><strong>02 / Thread registers</strong>global_a[4]<br>global_b[4]</div><span class="arrow">→</span>
+<div class="node" data-node="shared" style="--color:var(--shared)"><strong>03 / Shared union</strong>2 mainloop stages<br>then epilogue scratch</div><span class="arrow">→</span>
+<div class="node" data-node="warp" style="--color:var(--reg)"><strong>04 / Operand registers</strong>warp_a[2][8]<br>warp_b[2][8]</div><span class="arrow">→</span>
+<div class="node" data-node="acc" style="--color:var(--acc)"><strong>05 / Accumulators</strong>64 persistent registers<br>8×8 outer-product FMA</div><span class="arrow">→</span>
+<div class="node" data-node="output" style="--color:var(--out)"><strong>06 / Epilogue → D</strong>8 shared exchanges<br>α scaling → global store</div>
+</div>
+<div class="legend"><span style="--color:var(--global)"><i class="dot"></i>Global input</span><span style="--color:var(--shared)"><i class="dot"></i>Shared allocation</span><span style="--color:var(--reg)"><i class="dot"></i>Registers</span><span style="--color:var(--acc)"><i class="dot"></i>Accumulator</span><span style="--color:var(--out)"><i class="dot"></i>Output</span><span>White outline = pinned logical value</span></div>
+</section>
+<section class="panel">
+<div class="subhead"><h2>One allocation. Two lifetimes.</h2><small>union SharedStorage · 16,384 bytes / block</small></div>
+<div id="union" class="union"></div><div id="shared-caption" class="caption"></div>
+<div class="subhead" style="margin-top:16px"><h3>Shared values addressed by this lane</h3><small id="shared-label"></small></div><div id="shared-values" class="cells" style="--color:var(--shared)"></div>
+</section>
+<div class="views">
+<section class="panel"><div class="subhead"><h2>Global input window</h2><small>4 A + 4 B addresses / selected lane</small></div><div id="global-values" class="cells" style="--color:var(--global)"></div><p id="global-caption" class="caption"></p>
+<h3>Temporary registers</h3><div id="temp-values" class="cells" style="--color:var(--reg)"></div><p id="temp-caption" class="caption"></p></section>
+<section class="panel"><div class="subhead"><h2>Warp operands</h2><small>two slots × (8 A + 8 B)</small></div><div id="operands"></div><p class="caption">Slots alternate each K-step; their contents are overwritten, not accumulated. The final step may leave the other slot holding an older tile.</p></section>
+<section class="panel"><div class="subhead"><h2>Accumulator[64]</h2><small id="acc-label"></small></div><div id="acc-values" class="cells" style="--color:var(--acc)"></div><p class="caption">Rows = r, columns = c of this thread’s 8×8 tile. The same 64 registers persist across every K tile; no mainloop spill is modeled.</p></section>
+<section class="panel"><div class="subhead"><h2>Epilogue exchange → D</h2><small id="output-label"></small></div><h3>Producer: 8 accumulator stores</h3><div id="epi-stores" class="cells" style="--color:var(--acc)"></div><h3 style="margin-top:12px">Consumer: 8 reordered loads / D writes</h3><div id="output-values" class="cells" style="--color:var(--out)"></div><p id="epi-caption" class="caption"></p></section>
+</div>
+<section class="panel"><div class="subhead"><h2>Movement ledger</h2><small>Cumulative, selected block · not hardware transactions</small></div><div class="scroll"><table><thead><tr><th>Stage / operation</th><th>FP32 words</th><th>Bytes</th><th>Source operations</th></tr></thead><tbody id="ledger"></tbody></table></div><p class="caption">Counts cover all 256 threads, not just the selected lane. Each shared operand vector contains 4 words; other modeled loads/stores are scalar. FMA = one multiply-add (2 FLOPs). Byte totals count requested payload, not cache lines or DRAM traffic.</p></section>
+</div>
+<aside class="stack sidebar">
+<section class="panel"><h2>Execution scope</h2><p id="scope" class="muted"></p><div class="metrics"><div class="metric"><strong id="fmas">0</strong>FMAs / block</div><div class="metric"><strong id="barriers">0</strong>block barriers</div></div><p id="phase-info" class="caption"></p></section>
+<section class="panel"><div class="subhead"><h2>Pinned trace</h2><button id="unpin" class="mini">Clear</button></div><div id="trace" class="trace">Click any value to trace its logical identity. Hover or focus a value for its coordinate, number, register, and address.</div></section>
+<section class="panel"><h2>Event timeline</h2><p class="muted mini">Logical order, not elapsed GPU time. Click an event to seek. Showing a window around the current event.</p><div id="timeline" class="timeline"></div></section>
+</aside>
+</div>
+<div class="explain">
+<details class="panel" open><summary>Pipeline overview & mapping assumptions</summary><p>Representative block: 128×128 outputs, 256 threads, 8 warps arranged 4×2. A K tile is 8 elements deep. All addresses are row-major FP32 in a 4096×4096 space. Block x selects output columns; block y selects output rows. Choose 512 K tiles for the full K=4096 product; shorter runs compute <strong>D = α · A[:, 0:K] · B[0:K, :]</strong>, not the full product.</p><p>For thread t = 32w + lane, temporary index j: q = t + 256j. A loads (row = q≫3, k = q&amp;7), B loads (k = q≫7, col = q&amp;127). Warp w owns rows 32(w≫1)..+31 and columns 64(w&amp;1)..+63. Accumulator (r,c) maps to row = 32(w≫1) + 8(lane≫3) + r, col = 64(w&amp;1) + 8(lane&amp;7) + c, plus block origins.</p><p>No XOR swizzle is assumed: the chat’s XOR example is not evidence of this kernel’s actual layout. Numeric inputs are deterministic: A[y,k] = ((3y+k) mod 7)−3, B[k,x] = ((k+2x) mod 5)−2. Accumulator numbers are exact integer sums here; this is not an IEEE rounding study.</p></details>
+<details class="panel" open><summary>Double buffering & barriers</summary><p>Prologue loads global_a[4] and global_b[4], stores shared stage 0, then synchronizes the block. Two shared stages each hold A[128×8] + B[8×128] = 8 KiB. Tile t reads stage t mod 2. At step 0 it prefetches tile t+1 into the temporary registers, if one exists. At step 7 those registers commit to the alternate stage, then a barrier makes it available before switching.</p><p>warp_a[2][8] and warp_b[2][8] are a separate two-slot register ping-pong. This visualization loads step s+1 into the alternate slot before the FMA for step s, except at step 7. This is a source-order representation, not a latency-overlap claim. There is no out-of-range final prefetch. Barrier placement is a safe representative schedule pending the actual listing.</p></details>
+<details class="panel" open><summary>Epilogue staging & transpose-like reconstruction</summary><p>After all K tiles, the mainloop storage is dead and the <em>same union allocation</em> becomes epilogue scratch. Each of 8 iterations selects accumulator row r = iteration. Each warp writes 32×8 words at offset 256w + 8lane + c. A barrier publishes those stores. Consumer lane loads 256w + 32j + lane, for j = 0..7, scales by α, and writes D. A second barrier prevents scratch reuse before all consumers finish.</p><p>Decode q = 32j + lane: producer lane = q≫3, producer c = q&amp;7. This exchange changes which lane holds a value; it does not transpose the mathematical output. Neighboring consumers write neighboring columns. Scratch uses the first 8 KiB of the 16 KiB union; the other half is inactive, not an additional allocation.</p></details>
+<details class="panel" open><summary>PTX helpers / explicit memory operations</summary><p><code>@p ld.global.L2::128B.u32</code>: when the predicate is true, load one 32-bit word from a global address into a register. When false, no load occurs; the destination is not implicitly zeroed (a helper may initialize it separately). <code>L2::128B</code> is a cache/prefetch-size hint, <strong>not</strong> a 128-byte payload or proof of a cache hit. This app counts 4 bytes per active instruction.</p><p><code>ld.shared.v4.b32</code>: load four 32-bit words from shared memory into four registers, a 16-byte payload. Each modeled 8-element operand fragment uses two such loads.</p><p><code>@p st.global.u32</code>: when the predicate is true, store one 32-bit register word to global memory; otherwise perform no store. FP32 values travel as 32-bit bit patterns. The representative full tiles here are in bounds, so predicates are true. These helpers describe memory operations and predication—not instruction timing, cache behavior, or a cycle-accurate GPU simulation.</p></details>
+<section class="panel" id="audits"><div class="subhead"><h2>Self-test / mapping audit</h2><button id="run-audits">Run again</button></div><p class="muted">Checks the representative model, not equivalence to the unavailable kernel. Runs automatically without a server or dependency.</p><div id="audit-results" aria-live="polite"></div></section>
+</div>
+<footer>Static, offline, dependency-free. Open this file directly. All steps are pedagogical source-level events; no microarchitectural timing is implied.</footer>
+</main>
+<script>
+'use strict';
+// Representative reconstruction only: the supplied excerpt has no kernel listing.
+// Shapes follow the requested global_[4], warp_[2][8], accumulator[64] structure.
+const $ = id => document.getElementById(id);
+const N = 4096, THREADS = 256, STAGE_WORDS = 2048;
+const fmt = n => n.toLocaleString('en-US');
+const state = {index:0, tiles:2, bx:0, by:0, warp:0, lane:0, alpha:1, coords:true, pin:null, playing:false};
+let events = [], totals = [], timer = null;
+const names = ['Global → temporary registers','Temporary → shared stages','Shared → warp fragments','Accumulator → epilogue shared','Epilogue shared → registers','Registers → global D'];
+const emptyCounts = () => ({words:[0,0,0,0,0,0], fmas:0, barriers:0});
+function outCoord(w,l,r,c,bx=state.bx,by=state.by) {
+  return {y:by*128+(w>>1)*32+(l>>3)*8+r, x:bx*128+(w&1)*64+(l&7)*8+c};
+}
+function inputValue(v) { return v.kind==='A' ? (v.y*3+v.k)%7-3 : (v.k+v.x*2)%5-2; }
+function identity(v) { return v.kind==='A' ? `A:${v.y}:${v.k}` : v.kind==='B' ? `B:${v.k}:${v.x}` : `D:${v.y}:${v.x}`; }
+function coordinate(v) { return v.kind==='A' ? `A x${v.k}y${v.y}` : v.kind==='B' ? `B x${v.x}y${v.k}` : `${v.kind} x${v.x}y${v.y}`; }
+function globalWord(v) { return v.kind==='A' ? v.y*N+v.k : v.kind==='B' ? v.k*N+v.x : v.y*N+v.x; }
+function tempValues(tile,t=state.warp*32+state.lane) {
+  const a=[],b=[];
+  for(let j=0;j<4;j++) {
+    const q=t+THREADS*j;
+    a.push({kind:'A',y:state.by*128+(q>>3),k:tile*8+(q&7),reg:`global_a[${j}]`,shared:tile%2*STAGE_WORDS+q});
+    b.push({kind:'B',k:tile*8+(q>>7),x:state.bx*128+(q&127),reg:`global_b[${j}]`,shared:tile%2*STAGE_WORDS+1024+q});
+  }
+  return [...a,...b];
+}
+function operandValues(tile,s,w=state.warp,l=state.lane) {
+  const a=[],b=[];
+  for(let i=0;i<8;i++) {
+    const p=outCoord(w,l,i,i);
+    a.push({kind:'A',y:p.y,k:tile*8+s,reg:`warp_a[${s%2}][${i}]`,shared:tile%2*STAGE_WORDS+(p.y-state.by*128)*8+s});
+    b.push({kind:'B',x:p.x,k:tile*8+s,reg:`warp_b[${s%2}][${i}]`,shared:tile%2*STAGE_WORDS+1024+s*128+p.x-state.bx*128});
+  }
+  return [...a,...b];
+}
+// Epilogue: producer [lane][c] -> shared -> consumer [j][lane].
+function exchange(w,l,iter,j) {
+  const q=j*32+l, producer=q>>3, c=q&7;
+  return {kind:'D',...outCoord(w,producer,iter,c),shared:w*256+q,producer,c,reg:`epilogue[${j}]`};
+}
+function accumulator(y,x,steps) {
+  // Exact periodic sum for these small deterministic integer inputs (period lcm(7,5)).
+  let sum=0, cycle=0;
+  for(let k=0;k<35;k++) cycle+=inputValue({kind:'A',y,k})*inputValue({kind:'B',x,k});
+  sum=Math.floor(steps/35)*cycle;
+  for(let k=0;k<steps%35;k++) sum+=inputValue({kind:'A',y,k})*inputValue({kind:'B',x,k});
+  return sum;
+}
+function buildEvents() {
+  events=[];
+  const add=(type,title,detail,nodes,extra={})=>events.push({type,title,detail,nodes,tile:0,s:0,iter:0,...extra});
+  add('init','Initialize persistent accumulator registers','Each thread owns 64 zeroed registers. They persist through all K tiles.',['acc']);
+  add('global','Prologue · load first K tile','Each thread loads 4 A + 4 B words into temporary registers: 2,048 scalar loads / block.',['global','temp']);
+  add('commit','Prologue · commit shared stage 0','Store global_a[4] and global_b[4] into shared stage 0: 8,192 bytes / block.',['temp','shared']);
+  add('barrier','Prologue · __syncthreads()','Publish stage 0 before any warp reads it.',['shared']);
+  for(let tile=0;tile<state.tiles;tile++) {
+    add('switch',`K tile ${tile} · read shared stage ${tile%2}`,`Stage ${tile%2} is ready. Load step 0 into operand register slot 0.`,['shared','warp'],{tile});
+    for(let s=0;s<8;s++) {
+      if(s===0 && tile+1<state.tiles)
+        add('global',`Step 0 · prefetch K tile ${tile+1}`,`Read the next tile into global_a/global_b while stage ${tile%2} remains the current shared input. No timing overlap is asserted.`,['global','temp'],{tile,s,loadTile:tile+1});
+      if(s<7)
+        add('operand',`Step ${s} · prepare operand slot ${(s+1)%2}`,`Shared stage ${tile%2} → slot ${(s+1)%2} for step ${s+1}; slot ${s%2} retains the current operands.`,['shared','warp'],{tile,s,loadStep:s+1});
+      add('fma',`K tile ${tile} · step ${s} · 8×8 FMAs`,`Read operand slot ${s%2}; update the same 64 accumulator registers / thread (16,384 FMAs / block).`,['warp','acc'],{tile,s});
+      if(s===7 && tile+1<state.tiles) {
+        add('commit',`Step 7 · commit shared stage ${(tile+1)%2}`,`Store the prefetched K tile ${tile+1} from temporary registers into the alternate stage.`,['temp','shared'],{tile,s,storeTile:tile+1});
+        add('barrier','Stage handoff · __syncthreads()','Finish current readers and publish the alternate stage before the next tile switches stages.',['shared'],{tile,s});
+      }
+    }
+  }
+  add('union','Lifetime switch · mainloop → epilogue','Block barrier: all mainloop reads finish before the union allocation is overwritten as epilogue scratch.',['shared','acc'],{tile:state.tiles-1,s:7});
+  for(let iter=0;iter<8;iter++) {
+    const extra={tile:state.tiles-1,s:7,iter};
+    add('epiStore',`Epilogue ${iter}/7 · accumulator → shared`,`Store accumulator row r=${iter}: 8 words / thread, 2,048 words / block into the first 8 KiB of the same union.`,['acc','shared'],extra);
+    add('barrier',`Epilogue ${iter}/7 · publish barrier`,'All producer stores are visible before reordered shared loads.',['shared'],extra);
+    add('epiLoad',`Epilogue ${iter}/7 · reordered shared loads`,'Read shared[256w + 32j + lane]. Values change lane ownership; the output matrix is not transposed.',['shared','output'],extra);
+    add('output',`Epilogue ${iter}/7 · scale and write D`,'Multiply each loaded accumulator by α and issue 8 predicated scalar global stores / thread. All representative coordinates are in bounds.',['output'],extra);
+    add('barrier',`Epilogue ${iter}/7 · scratch reuse barrier`,'All shared readers finish before scratch is overwritten by the next iteration.',['shared'],extra);
+  }
+  add('done','Complete · D = α · A · B','All 128×128 outputs of the selected block have been written. Short K runs use only the selected K range.',['output'],{tile:state.tiles-1,s:7,iter:7});
+  let count=emptyCounts(),steps=0,tempTile=-1,slots=[null,null],stageTiles=[null,null],epilogue=false,stored=-1,loaded=-1,written=-1;
+  totals=events.map(e=>{
+    count={words:[...count.words],fmas:count.fmas,barriers:count.barriers};
+    if(e.type==='global'){count.words[0]+=2048;tempTile=e.loadTile??0;}
+    if(e.type==='commit'){count.words[1]+=2048;const t=e.storeTile??0;stageTiles[t%2]=t;}
+    if(e.type==='switch'){count.words[2]+=4096;slots=[{tile:e.tile,s:0},slots[1]];}
+    if(e.type==='operand'){count.words[2]+=4096;slots=[...slots];slots[e.loadStep%2]={tile:e.tile,s:e.loadStep};}
+    if(e.type==='fma'){count.fmas+=16384;steps++;}
+    if(e.type==='barrier'||e.type==='union')count.barriers++;
+    if(e.type==='union')epilogue=true;
+    if(e.type==='epiStore'){count.words[3]+=2048;stored=e.iter;loaded=-1;}
+    if(e.type==='epiLoad'){count.words[4]+=2048;loaded=e.iter;}
+    if(e.type==='output'){count.words[5]+=2048;written=e.iter;}
+    return {...count,steps,tempTile,slots:[...slots],stageTiles:[...stageTiles],epilogue,stored,loaded,written};
+  });
+}
+function valueNumber(v,steps,scaled=false) {
+  return v.kind==='A'||v.kind==='B' ? inputValue(v) : accumulator(v.y,v.x,steps)*(scaled?state.alpha:1);
+}
+function cells(id,values,{steps=totals[state.index].steps,scaled=false,active=true}={}) {
+  const host=typeof id==='string'?$(id):id;
+  host.replaceChildren();
+  for(const v of values) {
+    const b=document.createElement('button');
+    b.className='cell'+(active?' current':' empty')+(state.pin&&identity(v)===identity(state.pin)?' pinned':'');
+    const num=valueNumber(v,steps,scaled);
+    // Separate coordinate axes so even x4095/y4095 remain legible on narrow screens.
+    const kind=document.createElement('small');kind.textContent=v.kind;
+    b.append(kind,document.createElement('br'));
+    if(state.coords){
+      b.append(document.createTextNode(`x${v.kind==='A'?v.k:v.x}`),document.createElement('br'),document.createTextNode(`y${v.kind==='B'?v.k:v.y}`));
+    } else b.append(document.createTextNode(String(num)));
+    const addr=`global byte ${globalWord(v)*4}`;
+    b.title=`${coordinate(v)} = ${num} · ${v.reg||'logical value'} · ${addr}${v.shared===undefined?'':` · shared word ${v.shared}`}${active?'':' · not yet resident / preview'}`;
+    b.setAttribute('aria-label',b.title);
+    b.onclick=()=>{state.pin={...v};render();};
+    host.append(b);
+  }
+}
+function renderUnion(e,t) {
+  const host=$('union');host.replaceChildren();
+  for(let i=0;i<2;i++) {
+    const d=document.createElement('div');
+    const active=t.epilogue?i===0:t.stageTiles[i]!==null&&e.tile%2===i;
+    d.className='region'+(active?' active':'')+(t.epilogue&&i===1?' inactive':'');
+    const head=document.createElement('strong');head.textContent=t.epilogue?(i===0?'Epilogue scratch · same bytes':'Inactive half · not allocated anew'):`Mainloop stage ${i}`;
+    const label=document.createElement('span');
+    label.textContent=t.epilogue?(i===0?`Iteration ${e.iter} · 2,048 FP32 words`:'No mainloop values remain live'):`A[1024] + B[1024] · ${t.stageTiles[i]===null?'not initialized':`K tile ${t.stageTiles[i]}`}`;
+    d.append(head,label,document.createElement('br'),document.createTextNode(`Byte offsets ${i*8192}–${(i+1)*8192-1}`));host.append(d);
+  }
+  $('shared-caption').textContent=t.epilogue?'Union lifetime: epilogue. Mainloop values are no longer valid. Producer and consumer lanes share the same scratch addresses.':`Union lifetime: mainloop. Read stage ${e.tile%2}; next commit targets stage ${(e.tile+1)%2}. Two shared stages are separate from the two operand register slots.`;
+}
+function renderTrace(e,t) {
+  const host=$('trace');host.replaceChildren();
+  if(!state.pin){host.textContent='Click any value to trace its logical identity. Hover or focus a value for its coordinate, number, register, and address.';return;}
+  const v=state.pin;
+  const lines=[`${coordinate(v)} · global word ${globalWord(v)} · byte ${globalWord(v)*4}`];
+  if(v.kind==='A'||v.kind==='B') {
+    const tile=Math.floor(v.k/8),s=v.k%8;
+    const local=v.kind==='A'?v.y-state.by*128:v.x-state.bx*128;
+    const q=v.kind==='A'?local*8+s:s*128+local,thread=q%256,j=Math.floor(q/256);
+    lines.push(`Value ${inputValue(v)} · K tile ${tile}, step ${s}`);
+    if(local<0||local>=128)lines.push('Pinned input is outside the current block. Select its block to view its local register/shared path.');
+    else {
+      lines.push(`Global → thread ${thread} (warp ${thread>>5}, lane ${thread&31}) → global_${v.kind.toLowerCase()}[${j}]`);
+      lines.push(`→ shared stage ${tile%2}, word ${tile%2*2048+(v.kind==='B'?1024:0)+q}, byte ${(tile%2*2048+(v.kind==='B'?1024:0)+q)*4}`);
+      const target=v.kind==='A'?`warp row ${Math.floor(local/32)}, lane row-group ${Math.floor(local%32/8)}, A element ${local%8}`:`warp column ${Math.floor(local/64)}, lane column-group ${Math.floor(local%64/8)}, B element ${local%8}`;
+      lines.push(`→ operand slot ${s%2} · ${target}`);
+      lines.push('→ reused in outer-product FMAs; the input contributes to multiple output accumulators (it is not itself an output value).');
+      lines.push(tile>=state.tiles?'Outside this run’s selected K range.':`Shared stage is ${t.epilogue?'no longer live':t.stageTiles[tile%2]===tile?'resident':'not resident at this event'}.`);
+    }
+  } else {
+    const y=v.y-state.by*128,x=v.x-state.bx*128;
+    lines.push(`Accumulator now ${accumulator(v.y,v.x,t.steps)} · final D ${accumulator(v.y,v.x,state.tiles*8)*state.alpha}`);
+    if(y<0||y>=128||x<0||x>=128)lines.push('Pinned output is outside the current block.');
+    else {
+      const w=Math.floor(y/32)*2+Math.floor(x/64),r=y%8,c=x%8,l=Math.floor(y%32/8)*8+Math.floor(x%64/8),q=l*8+c;
+      lines.push(`Producer warp ${w}, lane ${l} → accumulator[${r*8+c}] (r=${r}, c=${c})`);
+      lines.push(`Persists through ${state.tiles} K tiles / ${state.tiles*8} FMA steps.`);
+      lines.push(`Epilogue iteration ${r} → shared word ${w*256+q}, byte ${(w*256+q)*4}`);
+      lines.push(`→ consumer warp ${w}, lane ${q%32}, j=${Math.floor(q/32)} → × α (${state.alpha}) → D`);
+      lines.push(`Status: ${t.written>=r?'written to D':t.loaded===r?'in epilogue registers':t.stored===r?'staged in shared':'still in accumulator registers'}.`);
+    }
+  }
+  for(const line of lines){const p=document.createElement('p');p.textContent=line;host.append(p);}
+}
+function render() {
+  const e=events[state.index],t=totals[state.index];
+  $('event-title').textContent=e.title;$('event-detail').textContent=e.detail;
+  $('event-number').textContent=`${state.index+1} / ${events.length}`;
+  $('progress').style.width=`${100*state.index/(events.length-1)}%`;
+  document.querySelectorAll('.node').forEach(n=>n.classList.toggle('active',e.nodes.includes(n.dataset.node)));
+  $('tile').value=e.tile;$('kstep').value=e.s;$('epi').value=e.iter;
+  $('step').disabled=state.index===events.length-1;
+  $('scope').textContent=`Block (${state.bx}, ${state.by}) · rows ${state.by*128}–${state.by*128+127}, columns ${state.bx*128}–${state.bx*128+127}. Warp ${state.warp}, lane ${state.lane} · thread ${state.warp*32+state.lane}. K = ${state.tiles*8}${state.tiles<512?' (partial K demonstration)':' (full product)'}.`;
+  $('phase-info').textContent=`${t.steps} / ${state.tiles*8} FMA steps completed. ${t.epilogue?'Epilogue owns the union.':`Shared read stage ${e.tile%2}; operand consume slot ${e.s%2}.`}`;
+  $('fmas').textContent=fmt(t.fmas);$('barriers').textContent=t.barriers;
+  renderUnion(e,t);
+  const gt=e.loadTile??e.tile;
+  cells('global-values',tempValues(gt));
+  $('global-caption').textContent=`A and B at K tile ${gt}; each cell is one 4-byte scalar. Coordinates use x = column, y = row.`;
+  cells('temp-values',tempValues(Math.max(0,t.tempTile)),{active:t.tempTile>=0});
+  $('temp-caption').textContent=t.tempTile<0?'Not initialized. Cells preview the first load.':`Holding K tile ${t.tempTile}. These registers are reused by the step-0 prefetch and step-7 commit.`;
+  const operands=$('operands');operands.replaceChildren();
+  t.slots.forEach((slot,i)=>{
+    const d=document.createElement('div');d.className='slot'+(!t.epilogue&&e.s%2===i?' active':'');
+    const h=document.createElement('h3');h.textContent=`Slot ${i} · ${slot?`K tile ${slot.tile}, step ${slot.s}`:'not initialized'}`;
+    const grid=document.createElement('div');grid.className='cells';grid.style.setProperty('--color','var(--reg)');
+    d.append(h,grid);operands.append(d);
+    cells(grid,operandValues(slot?.tile??0,slot?.s??i),{active:!!slot&&!t.epilogue});
+  });
+  let sv=[];
+  if(t.epilogue) {
+    if(t.stored>=0)for(let j=0;j<8;j++)sv.push(exchange(state.warp,state.lane,t.stored,j));
+    $('shared-label').textContent=t.stored<0?'No epilogue stores yet':`Scratch iteration ${t.stored} · consumer addresses`;
+  } else {
+    const st=e.tile%2,resident=t.stageTiles[st];
+    if(resident!==null)sv=operandValues(resident,e.s);
+    $('shared-label').textContent=`Stage ${st} · ${resident===null?'not initialized':`K tile ${resident}, step ${e.s}`}`;
+  }
+  cells('shared-values',sv);
+  const acc=[];
+  for(let r=0;r<8;r++)for(let c=0;c<8;c++)acc.push({kind:'D',...outCoord(state.warp,state.lane,r,c),reg:`accumulator[${r*8+c}]`});
+  cells('acc-values',acc);
+  $('acc-label').textContent=`${t.steps} outer-product updates / register`;
+  const stores=[];
+  for(let c=0;c<8;c++)stores.push({kind:'D',...outCoord(state.warp,state.lane,e.iter,c),shared:state.warp*256+state.lane*8+c,reg:`accumulator[${e.iter*8+c}]`});
+  cells('epi-stores',stores,{active:t.epilogue&&t.stored===e.iter});
+  const outs=Array.from({length:8},(_,j)=>exchange(state.warp,state.lane,e.iter,j));
+  cells('output-values',outs,{steps:state.tiles*8,scaled:true,active:t.written>=e.iter});
+  $('output-label').textContent=`Iteration ${e.iter} / 7`;
+  $('epi-caption').textContent=`${t.epilogue?'':'Address preview; epilogue has not started. '}${t.written>=e.iter?'D values written.':'D values preview final results; not written yet.'} Producer lane ${state.lane} stores consecutive scratch words; consumer lane ${state.lane} reads words 32 apart.`;
+  const ledger=$('ledger');ledger.replaceChildren();
+  t.words.forEach((words,i)=>{
+    const row=document.createElement('tr');
+    [names[i],fmt(words),fmt(words*4),`${fmt(i===2?words/4:words)} ${i===2?'vector loads (v4)':i===0||i===4?'scalar loads':'scalar stores'}`].forEach(text=>{const td=document.createElement('td');td.textContent=text;row.append(td);});
+    ledger.append(row);
+  });
+  const timeline=$('timeline');timeline.replaceChildren();
+  for(let i=Math.max(0,state.index-5);i<Math.min(events.length,state.index+9);i++){
+    const b=document.createElement('button');b.textContent=`${i+1}. ${events[i].title}`;b.className=i===state.index?'active':'';
+    if(i===state.index)b.setAttribute('aria-current','step');
+    b.onclick=()=>{pause();state.index=i;render();};timeline.append(b);
+  }
+  renderTrace(e,t);
+}
+function pause(){state.playing=false;clearTimeout(timer);$('play').textContent='▶ Play';}
+function tick(){
+  if(!state.playing)return;
+  if(state.index>=events.length-1){pause();return;}
+  state.index++;render();
+  if(state.index===events.length-1)pause();
+  else timer=setTimeout(tick,1000/Number($('speed').value));
+}
+function seek(predicate){pause();const i=events.findIndex(predicate);if(i>=0){state.index=i;render();}}
+function options(id,n){$(id).replaceChildren(...Array.from({length:n},(_,i)=>new Option(String(i),String(i))));}
+options('warp',8);options('lane',32);options('kstep',8);options('epi',8);options('tile',state.tiles);
+$('play').onclick=()=>{if(state.playing)pause();else{if(state.index===events.length-1)state.index=0;state.playing=true;$('play').textContent='Ⅱ Pause';tick();}};
+$('step').onclick=()=>{pause();state.index=Math.min(state.index+1,events.length-1);render();};
+$('reset').onclick=()=>{pause();state.index=0;render();};
+$('speed').oninput=()=>{$('speed-label').textContent=`${$('speed').value} events/s`;};
+for(const [id,key,max] of [['block-x','bx',31],['block-y','by',31],['warp','warp',7],['lane','lane',31]]) {
+  $(id).onchange=()=>{state[key]=Math.max(0,Math.min(max,Math.trunc(Number($(id).value)||0)));$(id).value=state[key];render();};
+}
+$('alpha').onchange=()=>{const n=Number($('alpha').value);state.alpha=Number.isFinite(n)?Math.max(-10,Math.min(10,n)):1;$('alpha').value=state.alpha;render();};
+$('coords').onchange=()=>{state.coords=$('coords').checked;render();};
+$('unpin').onclick=()=>{state.pin=null;render();};
+$('tiles').onchange=()=>{pause();state.tiles=Number($('tiles').value);state.index=0;options('tile',state.tiles);buildEvents();render();runAudits();};
+$('tile').onchange=()=>{const tile=Number($('tile').value);seek(e=>e.type==='switch'&&e.tile===tile);};
+$('kstep').onchange=()=>{const tile=events[state.index].tile,s=Number($('kstep').value);seek(e=>e.type==='fma'&&e.tile===tile&&e.s===s);};
+$('epi').onchange=()=>{const iter=Number($('epi').value);seek(e=>e.type==='epiStore'&&e.iter===iter);};
+function runAudits() {
+  const results=[];
+  const check=(name,fn)=>{try{if(!fn())throw Error('assertion failed');results.push({name,ok:true});}catch(err){results.push({name,ok:false,error:err.message});}};
+  check('Global fragment mapping covers each A/B tile word exactly once',()=>{
+    const seen=[new Set(),new Set()];
+    for(let t=0;t<256;t++)tempValues(0,t).forEach(v=>seen[v.kind==='A'?0:1].add(globalWord(v)));
+    return seen.every(s=>s.size===1024);
+  });
+  check('All 16,384 output coordinates have one accumulator owner',()=>{
+    const seen=new Set();
+    for(let w=0;w<8;w++)for(let l=0;l<32;l++)for(let r=0;r<8;r++)for(let c=0;c<8;c++){
+      const {y,x}=outCoord(w,l,r,c);
+      if(y<state.by*128||y>=state.by*128+128||x<state.bx*128||x>=state.bx*128+128)return false;
+      seen.add(y*N+x);
+    }
+    return seen.size===16384;
+  });
+  check('Shared operand addresses reconstruct the intended A/B coordinates',()=>{
+    for(let tile=0;tile<2;tile++)for(let w=0;w<8;w++)for(let l=0;l<32;l++)for(let s=0;s<8;s++)for(const v of operandValues(tile,s,w,l)){
+      const local=v.shared-tile*STAGE_WORDS;
+      const q=v.kind==='A'?local:local-1024;
+      if(v.kind==='A'&&(v.y!==state.by*128+(q>>3)||v.k!==tile*8+(q&7)))return false;
+      if(v.kind==='B'&&(v.k!==tile*8+(q>>7)||v.x!==state.bx*128+(q&127)))return false;
+      if(local<0||local>=2048)return false;
+    }
+    return true;
+  });
+  check('8 epilogue exchanges preserve values, cover D once, and reorder lanes',()=>{
+    const seen=new Set();
+    for(let w=0;w<8;w++)for(let it=0;it<8;it++)for(let l=0;l<32;l++)for(let j=0;j<8;j++){
+      const v=exchange(w,l,it,j),p=outCoord(w,v.producer,it,v.c);
+      if(v.x!==p.x||v.y!==p.y||v.shared!==w*256+v.producer*8+v.c)return false;
+      if(v.shared<0||v.shared>=2048)return false;
+      if(l<31){const next=exchange(w,l+1,it,j);if(next.x!==v.x+1||next.y!==v.y)return false;}
+      seen.add(globalWord(v));
+    }
+    return seen.size===16384;
+  });
+  check('Source-event totals match K-dependent loads, FMAs, and output payloads',()=>{
+    const t=totals.at(-1),k=state.tiles;
+    return t.words.join(',')===[2048*k,2048*k,32768*k,16384,16384,16384].join(',')&&t.fmas===131072*k&&t.barriers===k+17;
+  });
+  check('Prefetch/commit, stage lifetime, operand slots, and epilogue barriers are safe',()=>{
+    for(let i=0;i<events.length;i++) {
+      const e=events[i],t=totals[i];
+      if(e.type==='global'&&(e.loadTile??0)>=state.tiles)return false;
+      if(e.type==='commit'&&t.tempTile!==(e.storeTile??0))return false;
+      if(e.type==='switch'&&t.stageTiles[e.tile%2]!==e.tile)return false;
+      if(e.type==='fma'){const slot=t.slots[e.s%2];if(!slot||slot.tile!==e.tile||slot.s!==e.s)return false;}
+      if(e.type==='epiLoad'&&(events[i-1].type!=='barrier'||events[i-2].type!=='epiStore'))return false;
+      if(e.type==='epiStore'&&i>0&&!['union','barrier'].includes(events[i-1].type))return false;
+    }
+    return true;
+  });
+  check('Numerical outer-product and reordered D agree with a direct GEMM reference',()=>{
+    for(const [w,l,it,j] of [[0,0,0,0],[3,17,6,5],[7,31,7,7]]) {
+      const v=exchange(w,l,it,j);let direct=0,blocked=0;
+      for(let k=0;k<state.tiles*8;k++)direct+=inputValue({kind:'A',y:v.y,k})*inputValue({kind:'B',x:v.x,k});
+      for(let tile=0;tile<state.tiles;tile++)for(let s=0;s<8;s++){
+        const ops=operandValues(tile,s,w,v.producer);
+        blocked+=inputValue(ops[it])*inputValue(ops[8+v.c]);
+      }
+      if(direct!==blocked||direct!==accumulator(v.y,v.x,state.tiles*8))return false;
+    }
+    return true;
+  });
+  const host=$('audit-results');host.replaceChildren();
+  const summary=document.createElement('strong');summary.className=results.every(r=>r.ok)?'audit-pass':'audit-fail';summary.textContent=`${results.filter(r=>r.ok).length} / ${results.length} audits passed`;host.append(summary);
+  const ul=document.createElement('ul');
+  results.forEach(r=>{const li=document.createElement('li');li.className=r.ok?'audit-pass':'audit-fail';li.textContent=`${r.ok?'✓':'✗'} ${r.name}${r.error?`: ${r.error}`:''}`;ul.append(li);});host.append(ul);
+  return results;
+}
+$('run-audits').onclick=runAudits;
+buildEvents();render();runAudits();
+</script>
+</body>
+</html>
