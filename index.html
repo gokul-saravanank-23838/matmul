@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Tile / CUDA memory mapping</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="mapping.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header>
+    <a class="brand" href="index.html" aria-label="Tile mapping home">T<span> / </span>ILE <small>CUDA MEMORY ATLAS</small></a>
+    <nav aria-label="Memory view">
+      <button id="global-tab" aria-pressed="true" aria-controls="global-screen">01 <b>GLOBAL READ</b></button>
+      <button id="shared-tab" aria-pressed="false" aria-controls="shared-screen">02 <b>SHARED WRITE</b></button>
+    </nav>
+    <div class="operand" role="group" aria-label="Selected operand">
+      <button id="operand-a" aria-pressed="true">A</button><button id="operand-b" aria-pressed="false">B</button>
+    </div>
+  </header>
+
+  <section class="toolbar" aria-label="Simulation controls">
+    <div class="actions">
+      <button id="load" class="primary">↓ Load block</button>
+      <button id="store" disabled>↓ Store block</button>
+      <button id="step" title="Perform the next valid Load or Store">Step →</button>
+      <button id="reset">Reset</button>
+    </div>
+    <div id="lifecycle" class="lifecycle" role="status" aria-live="polite"></div>
+    <label class="speed">Speed <input id="speed" type="range" min="0.5" max="3" value="1" step="0.5"><output id="speed-value">1×</output></label>
+    <button id="settings-toggle" aria-expanded="false" aria-controls="settings">Parameters ⚙</button>
+    <p class="load-count">ONE LOAD · per operand: <b>1024 floats / 4096 bytes</b> · A+B: <b>2048 floats / 8192 bytes</b></p>
+  </section>
+
+  <form id="settings" hidden>
+    <label>M <input name="M" value="4096" inputmode="numeric" required></label>
+    <label>N <input name="N" value="4096" inputmode="numeric" required></label>
+    <label>MATRIX_K <input name="K" value="4096" inputmode="numeric" required></label>
+    <label>Block row origin (m) <input name="blockRow" value="0" inputmode="numeric" required></label>
+    <label>Block column origin (n) <input name="blockColumn" value="0" inputmode="numeric" required></label>
+    <label>Simulated A base (bytes) <input name="aBase" value="0x100000000" required></label>
+    <label>Simulated B base (bytes) <input name="bBase" value="0x200000000" required></label>
+    <button type="submit">Apply & reset</button>
+    <p>Origins are logical element coordinates, not block indices. M,N ≥ 128; K is a positive multiple of 8. Decimal / hex unsigned 64-bit bases; zero means an offset convention, never a dereference.</p>
+    <p id="parameter-error" role="alert"></p>
+  </form>
+
+  <main>
+    <div class="workspace">
+      <section id="global-screen" class="screen" aria-labelledby="global-heading">
+        <div class="section-title">
+          <div><p class="eyebrow">01 / DEVICE MEMORY → THREAD REGISTERS</p><h1 id="global-heading">Global read<span>.</span></h1></div>
+          <p id="global-description"></p>
+        </div>
+        <div class="matrix-heading"><b id="matrix-label"></b><span id="slice-label"></span></div>
+        <div id="global-scroll" class="table-scroll global-scroll" tabindex="0" role="region" aria-label="Global source matrix; scroll for all 128 outer coordinates">
+          <table id="global-matrix"></table>
+        </div>
+        <p id="outer-omitted" class="table-hint"></p>
+        <div class="matrix-heading"><b>256 threads · 8 warps · 4 register slots / operand</b><span>Hover to trace · click / Enter to pin · Escape to clear</span></div>
+        <div id="warps" class="warp-deck" aria-label="Eight warps with four eight-lane addressing subgroups each"></div>
+      </section>
+
+      <section id="shared-screen" class="screen" hidden aria-labelledby="shared-heading">
+        <div class="section-title">
+          <div><p class="eyebrow">02 / THREAD REGISTERS → SHARED MEMORY</p><h1 id="shared-heading">Shared write<span>.</span></h1></div>
+          <p id="shared-description"></p>
+        </div>
+        <div class="matrix-heading"><b id="shared-label"></b><label>Cell size <input id="zoom" type="range" min="62" max="120" value="78" aria-label="Shared table cell width"></label></div>
+        <div class="store-source" aria-label="Whole-block register fragment slots">
+          <span>Register source<br><small>256 threads · selected operand</small></span>
+          <div id="store-slots"></div>
+        </div>
+        <div id="shared-overview" aria-label="Shared stage overview"></div>
+        <p class="table-hint">Overview: click to pan. Detailed table: scroll horizontally through all 132 columns; headers stay visible. Cells contain <b>source logical row.col</b>, not physical coordinates.</p>
+        <div id="shared-scroll" class="table-scroll shared-scroll" tabindex="0" role="region" aria-label="Shared memory stage zero, eight rows and 132 columns">
+          <table id="shared-matrix"></table>
+        </div>
+        <div class="shared-notes">
+          <p><b>Exact store:</b> physical row = localK; column = floor(t/8) + 32i; float index = row × 132 + column. No XOR swizzle.</p>
+          <p><b>Single stage:</b> 8 × 132 = 1056 slots. Original arrays: 2 × 8 × 132 = 2112 slots each. B starts 8448 bytes after A. Stage 0 is overwritten only on the next explicit Store.</p>
+          <p><b>Banks:</b> array-relative bank = index % 32, assuming a bank-aligned base. This address mapping alone does not establish a bank conflict; instruction concurrency, broadcast, and width matter.</p>
+        </div>
+      </section>
+    </div>
+
+    <aside class="inspector" aria-label="Selected thread and value inspector">
+      <div class="inspector-heading"><span class="eyebrow">PERSISTENT TRACE</span><button id="clear-pin" aria-label="Clear pinned trace">Unpin ×</button></div>
+      <div id="trace"></div>
+      <div class="audit"><b>Mapping audit</b><p id="audit-result" role="status"></p><button id="audit">Run audit ↗</button></div>
+    </aside>
+  </main>
+  <footer>
+    <span id="tile-status"></span>
+    <span>Source-level mapping, not GPU timing. A’s four scalar loads precede B’s four per thread; no cross-warp timing implied.</span>
+    <details><summary>About this model</summary><p>One Load models a whole-block load_input_tile invocation: 256 threads × four floats = 1024 floats / 4096 bytes per operand; A+B = 2048 floats / 8192 bytes. Only one operand is displayed, but both progress together. Eight-lane subgroups are addressing groups, not execution units. This serial Load → Loaded → Store → Ready teaching mode does not imply the original double-buffered kernel cannot overlap work. Mainloop arithmetic, caches, and hardware prefetching are intentionally excluded. Coordinates and addresses are simulated; no memory is dereferenced. <a href="README.md">Documentation & tests</a></p></details>
+  </footer>
+  <div id="announcement" class="sr-only" aria-live="polite"></div>
+  <div id="flights" aria-hidden="true"></div>
+</body>
+</html>
