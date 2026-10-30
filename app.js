@@ -39,14 +39,15 @@ bank_idx=${value.bank} (bank-aligned array base) · union absolute byte offset $
     $("global-description").textContent = session.operand === "A"
       ? "A(m,k) · row-major. Each thread reads four m coordinates, 32 rows apart, at the same k."
       : "B(k,n) · COLUMN-MAJOR. Each thread reads four n coordinates, 32 columns apart, at the same k.";
-    $("matrix-label").textContent = session.operand === "A" ? "A · logical m ↓ / k →" : "B · physical-memory view: n ↓ / k →; cells remain logical k.n";
+    const matrixLabel = session.operand === "A" ? "A · logical m ↓ / k →" : "B · physical-memory view: n ↓ / k →; cells remain logical k.n";
+    $("matrix-label").textContent = matrixLabel;
     $("slice-label").textContent = `q=${q} · k=${start}…${start + 7} / ${fmt(c.K)} · ${outerName}=${origin}…${origin + 127} of ${fmt(session.operand === "A" ? c.M : c.N)}`;
     const outerSize = session.operand === "A" ? c.M : c.N;
     const omitted = [];
     if (origin > 0) omitted.push(`${outerName}=0…${origin - 1}`);
     if (origin + 128 < outerSize) omitted.push(`${outerName}=${origin + 128}…${outerSize - 1}`);
     $("outer-omitted").textContent = omitted.length ? `Outside this block (omitted): ${omitted.join(" and ")}.` : "All outer coordinates are shown; none omitted outside this block.";
-    let html = `<caption class="sr-only">${$("matrix-label").textContent}. Only current eight-wide K slice rendered; all 128 block outer coordinates.</caption><thead><tr><th scope="col">${outerName} ↓ / k →</th>`;
+    let html = `<caption class="sr-only">${matrixLabel}. Only current eight-wide K slice rendered; all 128 block outer coordinates.</caption><thead><tr><th scope="col">${outerName} ↓ / k →</th>`;
     if (start > 0) html += `<th scope="col" class="omitted">0…${start - 1}<br>omitted</th>`;
     for (let k = start; k < start + 8; k++) html += `<th scope="col">k ${k}</th>`;
     if (start + 8 < c.K) html += `<th scope="col" class="omitted">${start + 8}…${c.K - 1}<br>omitted</th>`;
@@ -153,6 +154,7 @@ ${values.join("\n\n")}`;
   }
 
   function renderTrace() {
+    const focusedSlot = document.activeElement.closest("#trace [data-pin-slot]")?.dataset.pinSlot;
     const picked = selection();
     const q = traceQ(picked.source);
     if (q === null) {
@@ -179,7 +181,7 @@ ${values.join("\n\n")}`;
       const bv = f(picked.t, i, q, "B");
       const loaded = session.pending === q && i < session.loadedSlots[session.operand];
       html += `<div class="fragment-card${picked.i === i ? " selected" : ""}" style="--lane:${color(v.t)}">
-      <button data-pin-slot="${i}" aria-label="Pin fragment ${i} of thread ${v.t}">Pin i${i}</button><strong>i${i} · ${session.operand}(${value.coord})</strong><br>
+      <button data-pin-slot="${i}" aria-pressed="${Boolean(session.pin) && picked.i === i}" aria-label="Pin fragment ${i} of thread ${v.t}">Pin i${i}</button><strong>i${i} · ${session.operand}(${value.coord})</strong><br>
       ${picked.source === "shared" ? "Stored value" : loaded ? "Register populated" : "Source preview · register empty"}
       <dl><dt>Global element offset (${session.operand})</dt><dd>${value.offset}</dd>
       <dt>Effective absolute byte addresses</dt><dd>A(${av.coord}) ${hex(av.effective)} (${av.effective})<br>B(${bv.coord}) ${hex(bv.effective)} (${bv.effective})</dd>
@@ -188,6 +190,7 @@ ${values.join("\n\n")}`;
       <dt>Original union absolute byte offset (${session.operand})</dt><dd>${value.unionByteOffset}</dd></dl></div>`;
     }
     $("trace").innerHTML = html;
+    if (focusedSlot !== undefined) $("trace").querySelector(`[data-pin-slot="${focusedSlot}"]`).focus({ preventScroll: true });
     highlight();
   }
 
@@ -389,8 +392,13 @@ ${values.join("\n\n")}`;
     }
     root.addEventListener("pointerover", inspect);
     root.addEventListener("focusin", inspect);
-    root.addEventListener("pointerleave", () => { hover = null; renderTrace(); });
+    root.addEventListener("pointerleave", (event) => {
+      if (event.relatedTarget instanceof Node && $("trace").contains(event.relatedTarget)) return;
+      hover = null;
+      renderTrace();
+    });
     root.addEventListener("focusout", (event) => {
+      if ($("trace").contains(event.relatedTarget)) return;
       if (!root.contains(event.relatedTarget)) { hover = null; renderTrace(); }
     });
     root.addEventListener("click", (event) => {
